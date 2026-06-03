@@ -1,0 +1,32 @@
+/lgbm_model.pkl
+/tfidf_vectorizer.pkl
+/experiment_info.json
+# Model files
+/lgbm_model.pkl
+/tfidf_vectorizer.pkl
+/experiment_info.json
+
+# Virtual Environment
+myenv_01/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# VS Code
+.vscode/
+
+# MLflow
+mlruns/
+
+# DVC Cache
+.dvc/cache/
+
+# OS files
+.DS_Store
+Thumbs.db
