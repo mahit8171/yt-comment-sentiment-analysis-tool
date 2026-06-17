@@ -18,6 +18,9 @@ import json
 from mlflow.models import infer_signature
 
 
+# ── project root early so all paths (including log file) are anchored ──
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../'))
+
 # ── Logging configuration ──────────────────────────────────────────────────
 logger = logging.getLogger('model_evaluation')
 logger.setLevel('DEBUG')
@@ -25,7 +28,8 @@ logger.setLevel('DEBUG')
 console_handler = logging.StreamHandler()
 console_handler.setLevel('DEBUG')
 
-file_handler = logging.FileHandler('model_evaluation_errors.log')
+# anchor log file to ROOT_DIR instead of bare filename (which uses CWD)
+file_handler = logging.FileHandler(os.path.join(ROOT_DIR, 'model_evaluation_errors.log'))
 file_handler.setLevel('ERROR')
 
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -96,16 +100,18 @@ def evaluate_model(model, X_test: np.ndarray, y_test: np.ndarray):
         raise
 
 
-def log_confusion_matrix(cm, dataset_name: str) -> None:
+def log_confusion_matrix(cm, dataset_name: str, output_dir: str) -> None:
+    # FIX: accept output_dir so the PNG is written to a known writable location
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-    plt.title(f'Confusion Matrix – {dataset_name}')
+    plt.title(f'Confusion Matrix - {dataset_name}')
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
-    cm_file_path = f'confusion_matrix_{dataset_name}.png'
+    cm_file_path = os.path.join(output_dir, f'confusion_matrix_{dataset_name}.png')
     plt.savefig(cm_file_path)
     mlflow.log_artifact(cm_file_path)
     plt.close()
+    logger.debug('Confusion matrix saved to %s', cm_file_path)
 
 
 def save_model_info(run_id: str, model_path: str, file_path: str) -> None:
@@ -125,23 +131,22 @@ def main():
 
     with mlflow.start_run() as run:
         try:
-            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+            # ROOT_DIR is already resolved at module level; reuse it here
+            root_dir = ROOT_DIR
 
             params = load_params(os.path.join(root_dir, 'params.yaml'))
             for key, value in params.items():
                 mlflow.log_param(key, value)
 
-            # FIX #4 – absolute paths for model and vectorizer
             model      = load_model(os.path.join(root_dir, 'lgbm_model.pkl'))
             vectorizer = load_vectorizer(os.path.join(root_dir, 'tfidf_vectorizer.pkl'))
 
             test_data = load_data(os.path.join(root_dir, 'data/interim/test_processed.csv'))
 
-            X_test_tfidf   = vectorizer.transform(test_data['clean_comment'].values)
-            y_test         = test_data['category'].values
-            feature_names  = vectorizer.get_feature_names_out()
+            X_test_tfidf  = vectorizer.transform(test_data['clean_comment'].values)
+            y_test        = test_data['category'].values
+            feature_names = vectorizer.get_feature_names_out()
 
-            # FIX #1 – build signature with a DataFrame so pyfunc serves DataFrames
             input_example = pd.DataFrame(
                 X_test_tfidf.toarray()[:5],
                 columns=feature_names
@@ -156,11 +161,17 @@ def main():
             )
 
             model_path = "lgbm_model"
-            save_model_info(run.info.run_id, model_path, 'experiment_info.json')
+
+            # write experiment_info.json to root_dir, not bare CWD
+            save_model_info(
+                run.info.run_id,
+                model_path,
+                os.path.join(root_dir, 'experiment_info.json')
+            )
 
             mlflow.log_artifact(os.path.join(root_dir, 'tfidf_vectorizer.pkl'))
 
-            # Evaluate on full test set (use DataFrame for consistency)
+            # Evaluate on full test set
             X_test_df = pd.DataFrame(X_test_tfidf.toarray(), columns=feature_names)
             report, cm = evaluate_model(model, X_test_df, y_test)
 
@@ -172,7 +183,8 @@ def main():
                         f"test_{label}_f1-score":  metrics['f1-score']
                     })
 
-            log_confusion_matrix(cm, "Test Data")
+            # pass root_dir so PNG is written to the project root, not CWD
+            log_confusion_matrix(cm, "Test Data", output_dir=root_dir)
 
             mlflow.set_tag("model_type", "LightGBM")
             mlflow.set_tag("task",       "Sentiment Analysis")
