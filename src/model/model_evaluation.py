@@ -16,9 +16,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 from mlflow.models import infer_signature
+from mlflow.tracking import MlflowClient
 
 
-# ── project root early so all paths (including log file) are anchored ──
+# ──  project root early so all paths (including log file) are anchored ──
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../'))
 
 # ── Logging configuration ──────────────────────────────────────────────────
@@ -28,7 +29,7 @@ logger.setLevel('DEBUG')
 console_handler = logging.StreamHandler()
 console_handler.setLevel('DEBUG')
 
-# anchor log file to ROOT_DIR instead of bare filename (which uses CWD)
+# Anchor log file to ROOT_DIR instead of bare filename (which uses CWD)
 file_handler = logging.FileHandler(os.path.join(ROOT_DIR, 'model_evaluation_errors.log'))
 file_handler.setLevel('ERROR')
 
@@ -40,6 +41,38 @@ logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
 MLFLOW_TRACKING_URI = "http://ec2-13-218-87-51.compute-1.amazonaws.com:5000/"
+
+# Artifact store on the EC2 server — change this to any path the ec2-user
+# (or whatever user runs the MLflow server) has write access to.
+# Common options: /tmp/mlruns  OR  s3://your-bucket/mlruns
+MLFLOW_ARTIFACT_ROOT = "/tmp/mlruns"
+
+
+def get_or_create_experiment(experiment_name: str) -> str:
+    """
+    Return the experiment id, creating the experiment with an explicit
+    artifact_location if it does not already exist.
+    This avoids the MLflow server defaulting to /home/ubuntu which may
+    not be writable by the runner.
+    """
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        logger.debug(
+            "Experiment '%s' not found — creating with artifact root %s",
+            experiment_name, MLFLOW_ARTIFACT_ROOT,
+        )
+        experiment_id = client.create_experiment(
+            experiment_name,
+            artifact_location=MLFLOW_ARTIFACT_ROOT,
+        )
+    else:
+        experiment_id = experiment.experiment_id
+        logger.debug(
+            "Using existing experiment '%s' (id=%s, artifact_location=%s)",
+            experiment_name, experiment_id, experiment.artifact_location,
+        )
+    return experiment_id
 
 
 def load_data(file_path: str) -> pd.DataFrame:
@@ -101,7 +134,6 @@ def evaluate_model(model, X_test: np.ndarray, y_test: np.ndarray):
 
 
 def log_confusion_matrix(cm, dataset_name: str, output_dir: str) -> None:
-    # FIX: accept output_dir so the PNG is written to a known writable location
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
     plt.title(f'Confusion Matrix - {dataset_name}')
@@ -127,11 +159,12 @@ def save_model_info(run_id: str, model_path: str, file_path: str) -> None:
 
 def main():
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment('dvc-pipeline-runs')
 
-    with mlflow.start_run() as run:
+    # Use get_or_create_experiment so we control the artifact_location
+    experiment_id = get_or_create_experiment('dvc-pipeline-runs')
+
+    with mlflow.start_run(experiment_id=experiment_id) as run:
         try:
-            # ROOT_DIR is already resolved at module level; reuse it here
             root_dir = ROOT_DIR
 
             params = load_params(os.path.join(root_dir, 'params.yaml'))
@@ -162,7 +195,7 @@ def main():
 
             model_path = "lgbm_model"
 
-            # write experiment_info.json to root_dir, not bare CWD
+            # Write experiment_info.json to root_dir, not bare CWD
             save_model_info(
                 run.info.run_id,
                 model_path,
@@ -183,7 +216,7 @@ def main():
                         f"test_{label}_f1-score":  metrics['f1-score']
                     })
 
-            # pass root_dir so PNG is written to the project root, not CWD
+            # Pass root_dir so PNG is written to the project root, not CWD
             log_confusion_matrix(cm, "Test Data", output_dir=root_dir)
 
             mlflow.set_tag("model_type", "LightGBM")
@@ -192,6 +225,7 @@ def main():
 
         except Exception as e:
             logger.error('Failed to complete model evaluation: %s', e)
+            traceback.print_exc()
             print(f"Error: {e}")
 
 
