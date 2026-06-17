@@ -1,5 +1,7 @@
 # src/model/model_evaluation.py
 
+import traceback
+
 import numpy as np
 import pandas as pd
 import pickle
@@ -14,6 +16,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 from mlflow.models import infer_signature
+
 
 # ── Logging configuration ──────────────────────────────────────────────────
 logger = logging.getLogger('model_evaluation')
@@ -87,8 +90,9 @@ def evaluate_model(model, X_test: np.ndarray, y_test: np.ndarray):
         cm     = confusion_matrix(y_test, y_pred)
         logger.debug('Model evaluation completed')
         return report, cm
-    except Exception as e:
-        logger.error('Error during model evaluation: %s', e)
+    except Exception:
+        logger.exception("Failed to complete model evaluation")
+        traceback.print_exc()
         raise
 
 
