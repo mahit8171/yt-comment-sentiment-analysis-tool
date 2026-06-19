@@ -75,7 +75,7 @@ def register_model(model_name: str, model_info: dict) -> None:
 def main():
     try:
         model_info = load_model_info('experiment_info.json')
-        register_model("my_model", model_info)
+        register_model("yt_chrome_plugin_model", model_info)
     except Exception as e:
         logger.error('Failed to complete model registration: %s', e)
         print(f"Error: {e}")
