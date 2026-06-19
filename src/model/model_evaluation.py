@@ -190,7 +190,7 @@ def main():
                 model,
                 "lgbm_model",
                 signature=signature,
-                input_example=input_example
+                input_example=input_example.head(5)
             )
 
             model_path = "lgbm_model"
